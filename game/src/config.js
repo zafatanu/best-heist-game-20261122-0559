@@ -77,8 +77,6 @@ export const ALARM = {
   sprintNear: 3.4,
   decay: 6.0,
   decayDelay: 0.9,
-  lootStart: 14冼,
-  lootGrab: 8,
   lootReturn: 6,
 };
 
