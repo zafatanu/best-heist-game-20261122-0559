@@ -1,18 +1,25 @@
 // Boot and the one loop: input is read every frame, the world advances in fixed 1/60 s steps
 // (several in a slow frame, none in a fast one), and the renderer paints what is there. The game
-// moves between four screens: title, play, paused and game over.
+// moves between four screens: title, play, paused and over.
 //
-// ?seed=N fixes the falling pattern. ?shot=start|play|end (with &seed=N) stages that scene
-// instead of running the loop, paints it twice and sets window.__shotReady for a screenshot.
-import { BEST_KEY, LIVES, STEP } from './config.js';
+// ?seed=N fixes the layout and the guards' patrol timings. ?shot=cover|detection|loot|escape (with
+// &seed=N) stages that scene instead of running the loop, paints it twice and sets window.__shotReady
+// for a screenshot.
+import { BEST_KEY, MAX_FRAME, STEP } from './config.js';
 import { createRandom } from './random.js';
-import { createWorld, EVENT_HIT, EVENT_OVER } from './world.js';
-import { ACTION_CONFIRM, ACTION_PAUSE, createInput } from './input.js';
+import {
+  createWorld,
+  EVENT_BUSTED,
+  EVENT_GADGET,
+  EVENT_LOOT,
+  EVENT_SPOTTED,
+  EVENT_WIN,
+} from './world.js';
+import { ACTION_CONFIRM, ACTION_PAUSE, ACTION_RESTART, createInput } from './input.js';
 import { createRenderer, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
 import { stageShot } from './shots.js';
 
-/** The longest frame the loop catches up on; a longer stall (a hidden tab) is dropped, not replayed. */
-const MAX_FRAME = 0.25;
+const IDLE = { mx: 0, my: 0, sprint: false, interact: false, decoy: false, emp: false };
 
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
@@ -26,7 +33,8 @@ const renderer = createRenderer(canvas);
 
 function readBest() {
   try {
-    return Number.parseInt(window.localStorage.getItem(BEST_KEY) ?? '0', 10) || 0;
+    const value = Number.parseInt(window.localStorage.getItem(BEST_KEY) ?? '', 10);
+    return Number.isInteger(value) && value > 0 ? value : 0;
   } catch {
     return 0;
   }
@@ -36,7 +44,7 @@ function saveBest(value) {
   try {
     window.localStorage.setItem(BEST_KEY, String(value));
   } catch {
-    // Storage can be off (private windows): the best score then lasts this visit only.
+    // Storage can be off (private windows): the record time then lasts this visit only.
   }
 }
 
@@ -59,29 +67,39 @@ function runGame() {
   let accumulator = 0;
   let last = performance.now();
 
-  // Screen readers (and anyone watching the page's text) hear the screen changes and each hit.
+  // Screen readers (and anyone watching the page's text) hear each change of screen.
   function announce(message) {
     status.textContent = message;
   }
 
   function startGame() {
     world.reset();
+    world.state.phase = 'play';
     accumulator = 0;
     screen = SCREEN_PLAY;
-    announce(`Playing. ${LIVES} lives.`);
+    announce('Playing. Steal the Heart of Aurelia.');
   }
 
-  function endGame() {
+  // The clock stops on a clean getaway, so the run time is the score; lower is better.
+  function endGame(win) {
     screen = SCREEN_OVER;
-    if (world.state.score > best) {
-      best = world.state.score;
-      saveBest(best);
+    if (win) {
+      const time = Math.round(world.state.elapsed);
+      if (best === 0 || time < best) {
+        best = time;
+        saveBest(best);
+      }
+      announce(`Clean getaway. ${time}s. Best ${best}s.`);
+    } else {
+      announce('Busted.');
     }
-    announce(`Game over. Score ${world.state.score}. Best ${best}.`);
   }
 
-  function handleActions() {
-    const actions = input.takeActions();
+  function handleActions(actions) {
+    if (actions & ACTION_RESTART && screen !== SCREEN_TITLE) {
+      startGame();
+      return;
+    }
     if (actions & ACTION_CONFIRM && (screen === SCREEN_TITLE || screen === SCREEN_OVER)) startGame();
     else if (actions & ACTION_PAUSE && screen === SCREEN_PLAY) {
       screen = SCREEN_PAUSED;
@@ -94,19 +112,35 @@ function runGame() {
 
   function step() {
     if (screen === SCREEN_TITLE) {
-      world.step(STEP, 0, true);
+      // The courtyard backdrop keeps moving behind the title, but nothing can happen there.
+      world.step(STEP, IDLE);
       return;
     }
-    const events = world.step(STEP, input.direction(), false);
-    if (events & EVENT_OVER) endGame();
-    else if (events & EVENT_HIT) announce(world.state.lives === 1 ? 'Hit. 1 life left.' : `Hit. ${world.state.lives} lives left.`);
+    const presses = input.takePresses();
+    if (presses.restart) {
+      startGame();
+      return;
+    }
+    const events = world.step(STEP, {
+      mx: input.direction(),
+      my: input.vertical(),
+      sprint: input.sprint(),
+      interact: presses.interact,
+      decoy: presses.decoy,
+      emp: presses.emp,
+    });
+    if (events & EVENT_WIN) endGame(true);
+    else if (events & EVENT_BUSTED) endGame(false);
+    else if (events & EVENT_LOOT) announce('Diamond secured. Reach the exit.');
+    else if (events & EVENT_SPOTTED) announce('Spotted.');
+    else if (events & EVENT_GADGET) announce('Gadget armed.');
   }
 
   function frame(now) {
     requestAnimationFrame(frame);
     accumulator += Math.min((now - last) / 1000, MAX_FRAME);
     last = now;
-    handleActions();
+    handleActions(input.takeActions());
     if (screen === SCREEN_TITLE || screen === SCREEN_PLAY) {
       while (accumulator >= STEP && (screen === SCREEN_TITLE || screen === SCREEN_PLAY)) {
         step();
@@ -118,7 +152,7 @@ function runGame() {
     renderer.draw(world.state, screen, best);
   }
 
-  // Leaving the tab pauses a running game rather than letting blocks fall unseen.
+  // Leaving the tab pauses a running heist rather than letting the guards walk unwatched.
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && screen === SCREEN_PLAY) {
       screen = SCREEN_PAUSED;
@@ -126,7 +160,7 @@ function runGame() {
     }
   });
 
-  announce('Block Dodger. Press Space or click to start.');
+  announce('THE LAST VAULT. Press Space or click to start.');
   requestAnimationFrame(frame);
 }
 
