@@ -1,39 +1,23 @@
-// Drawing only: the world's state and the current screen in, pixels out. The 1280x720 playfield
-// is scaled to fit the window and centred, the margin filled with the backdrop colour. Flat
-// rectangles and circles, canvas text for the HUD and the panels. Text that holds a number is
-// rebuilt only when the number changes, so a frame allocates nothing.
-import { FIELD, FONT, LIVES, PALETTE } from './config.js';
-import { KIND_COIN } from './world.js';
+// Drawing only: the heist world's state and the current screen in, pixels out.
+import { FIELD, PALETTE, FONT, ROOM, COVER, LOOT, EXIT } from './config.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
 export const SCREEN_PAUSED = 'paused';
 export const SCREEN_OVER = 'over';
 
-/** The panel's width; its height grows with its lines: room for the title, the lines and the prompt. */
-const PANEL = { width: 600, top: 134, line: 34, bottom: 70 };
-const LIFE_SIZE = 20;
-const LIFE_GAP = 8;
+const PANEL_WIDTH = 680;
+const DEG = Math.PI / 180;
 
-function cachedLabel(prefix) {
-  let value = -1;
-  let text = '';
-  return function label(next) {
-    if (next !== value) {
-      value = next;
-      text = prefix + next;
-    }
-    return text;
-  };
+function alarmColor(label) {
+  if (label === 'SAFE') return PALETTE.teal;
+  if (label === 'SUSPICIOUS' || label === 'ALERT') return PALETTE.amber;
+  return PALETTE.red;
 }
 
 export function createRenderer(canvas) {
   const context = canvas.getContext('2d');
   const view = { scale: 1, x: 0, y: 0 };
-  const scoreLabel = cachedLabel('Score ');
-  const levelLabel = cachedLabel('Level ');
-  const finalLabel = cachedLabel('Score ');
-  const bestLabel = cachedLabel('Best ');
 
   function resize() {
     const ratio = window.devicePixelRatio || 1;
@@ -46,96 +30,154 @@ export function createRenderer(canvas) {
     view.y = (height - FIELD.height * view.scale) / 2;
   }
 
-  const fonts = new Map();
-  function text(value, x, y, size, color, align) {
-    if (!fonts.has(size)) fonts.set(size, `${size}px ${FONT}`);
-    context.font = fonts.get(size);
+  resize();
+  window.addEventListener('resize', resize);
+
+  function text(value, x, y, size, color, align = 'left') {
+    context.font = size + 'px ' + FONT;
     context.fillStyle = color;
     context.textAlign = align;
     context.fillText(value, x, y);
   }
 
-  function drawField(state) {
-    context.fillStyle = PALETTE.sky;
-    context.fillRect(0, 0, FIELD.width, FIELD.height);
-    context.fillStyle = PALETTE.ground;
-    context.fillRect(0, FIELD.groundY, FIELD.width, FIELD.height - FIELD.groundY);
+  function circle(x, y, radius, color) {
+    context.fillStyle = color;
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fill();
+  }
 
-    const items = state.items;
-    for (let index = 0; index < items.length; index += 1) {
-      const item = items[index];
-      if (!item.active) continue;
-      if (item.kind === KIND_COIN) {
-        context.fillStyle = PALETTE.coin;
-        context.beginPath();
-        context.arc(item.x + item.width / 2, item.y + item.height / 2, item.width / 2, 0, Math.PI * 2);
-        context.fill();
-      } else {
-        context.fillStyle = PALETTE.block;
-        context.fillRect(item.x, item.y, item.width, item.height);
+  function wedge(x, y, angleDeg, coneDeg, range, color) {
+    const facing = angleDeg * DEG;
+    const half = (coneDeg / 2) * DEG;
+    context.save();
+    context.globalAlpha = 0.25;
+    context.fillStyle = color;
+    context.beginPath();
+    context.moveTo(x, y);
+    context.arc(x, y, range, facing - half, facing + half);
+    context.closePath();
+    context.fill();
+    context.restore();
+  }
+
+  function rect(r, color) {
+    context.fillStyle = color;
+    context.fillRect(r.x, r.y, r.w, r.h);
+  }
+
+  function drawField(state) {
+    context.fillStyle = PALETTE.floor;
+    context.fillRect(0, 0, FIELD.width, FIELD.height);
+
+    context.strokeStyle = PALETTE.gold;
+    context.lineWidth = 3;
+    context.strokeRect(ROOM.x, ROOM.y, ROOM.w, ROOM.h);
+
+    for (const piece of COVER) {
+      context.fillStyle = PALETTE.teal;
+      context.fillRect(piece.x, piece.y, piece.w, piece.h);
+    }
+
+    const loot = state.loot;
+    if (!loot.taken) {
+      context.save();
+      context.globalAlpha = 0.3;
+      circle(loot.x, loot.y, 26, PALETTE.gold);
+      context.restore();
+      context.save();
+      context.translate(loot.x, loot.y);
+      context.rotate(Math.PI / 4);
+      context.fillStyle = PALETTE.gold;
+      context.fillRect(-9, -9, 18, 18);
+      context.restore();
+      if (loot.holdProgress > 0 && loot.holdProgress < 1) {
+        rect({ x: loot.x - 20, y: loot.y - 30, w: 40, h: 5 }, PALETTE.muted);
+        rect({ x: loot.x - 20, y: loot.y - 30, w: 40 * loot.holdProgress, h: 5 }, PALETTE.gold);
       }
+    } else {
+      rect({ x: loot.x - 14, y: loot.y - 14, w: 28, h: 28 }, PALETTE.muted);
+    }
+
+    rect(EXIT, state.exitLit ? PALETTE.gold : PALETTE.muted);
+    text('EXIT', EXIT.x + EXIT.w / 2, EXIT.y - 6, 14, PALETTE.muted, 'center');
+
+    for (const camera of state.cameras) {
+      if (camera.disabled) {
+        rect({ x: camera.x - 7, y: camera.y - 7, w: 14, h: 14 }, PALETTE.muted);
+        continue;
+      }
+      rect({ x: camera.x - 7, y: camera.y - 7, w: 14, h: 14 }, PALETTE.grey);
+      wedge(camera.x, camera.y, camera.angle, camera.cone, camera.range, camera.spotting ? PALETTE.red : PALETTE.amber);
+    }
+
+    for (const guard of state.guards) {
+      wedge(guard.x, guard.y, guard.angle, guard.cone, guard.range, guard.spotting ? PALETTE.red : PALETTE.amber);
+      circle(guard.x, guard.y, 9, PALETTE.red);
     }
 
     const player = state.player;
-    // Blink while invulnerable after a hit: hidden on every other tenth of a second.
-    if (player.invulnerable === 0 || Math.floor(player.invulnerable * 10) % 2 === 1) {
-      context.fillStyle = PALETTE.player;
-      context.fillRect(player.x, player.y, player.width, player.height);
-    }
+    circle(player.x, player.y, 8, PALETTE.cyan);
   }
 
   function drawHud(state) {
-    context.textBaseline = 'top';
-    text(scoreLabel(state.score), 24, 20, 28, PALETTE.text, 'left');
-    text(levelLabel(state.level), FIELD.width / 2, 20, 28, PALETTE.text, 'center');
-    const firstLife = FIELD.width - 24 - LIVES * (LIFE_SIZE + LIFE_GAP) + LIFE_GAP;
-    text('Lives', firstLife - 12, 20, 28, PALETTE.text, 'right');
-    for (let life = 0; life < LIVES; life += 1) {
-      context.fillStyle = life < state.lives ? PALETTE.player : PALETTE.ground;
-      context.fillRect(firstLife + life * (LIFE_SIZE + LIFE_GAP), 24, LIFE_SIZE, LIFE_SIZE);
-    }
+    text('ALARM ' + state.alarmLabel, 40, 34, 16, PALETTE.muted);
+    text(Math.round(state.alarm) + '%', 40, 58, 20, alarmColor(state.alarmLabel));
+    const x = 40, y = 66, w = 420, h = 16;
+    rect({ x, y, w, h }, PALETTE.panel);
+    rect({ x, y, w: (w * Math.max(0, Math.min(100, state.alarm))) / 100, h }, alarmColor(state.alarmLabel));
+
+    text('Q DECOY x' + state.gadgets.decoy + '    F EMP x' + state.gadgets.emp, 40, 118, 18, PALETTE.muted);
+
+    const objective = state.hasLoot ? 'DIAMOND SECURED — REACH THE EXIT' : 'STEAL THE HEART. REACH EXTRACTION.';
+    text(objective, 40, 146, 18, PALETTE.gold);
+
+    text('DETECTIONS ' + state.detections, FIELD.width - 40, 34, 16, PALETTE.muted, 'right');
+    text('TIME ' + Math.round(state.elapsed) + 's', FIELD.width - 40, 60, 20, PALETTE.muted, 'right');
   }
 
   function drawPanel(title, lines, prompt) {
-    const height = PANEL.top + lines.length * PANEL.line + PANEL.bottom;
-    const x = (FIELD.width - PANEL.width) / 2;
-    const y = (FIELD.height - height) / 2;
+    const top = FIELD.height / 2 - 120;
     context.fillStyle = PALETTE.panel;
-    context.fillRect(x, y, PANEL.width, height);
-    context.textBaseline = 'alphabetic';
-    text(title, FIELD.width / 2, y + 78, 48, PALETTE.text, 'center');
-    for (let index = 0; index < lines.length; index += 1) {
-      text(lines[index], FIELD.width / 2, y + PANEL.top + index * PANEL.line, 22, PALETTE.muted, 'center');
-    }
-    text(prompt, FIELD.width / 2, y + height - 40, 24, PALETTE.coin, 'center');
+    context.fillRect((FIELD.width - PANEL_WIDTH) / 2, top, PANEL_WIDTH, 240);
+    text(title, FIELD.width / 2, top + 60, 48, PALETTE.gold, 'center');
+    lines.forEach((line, index) => {
+      text(line, FIELD.width / 2, top + 108 + index * 30, 22, PALETTE.text, 'center');
+    });
+    text(prompt, FIELD.width / 2, top + 240 - 28, 24, PALETTE.gold, 'center');
   }
 
-  const TITLE_LINES = ['Dodge the red blocks. Catch the gold coins.', 'Move with ← → or A D.  Pause with P.', ''];
-  const PAUSED_LINES = ['The blocks will wait for you.'];
-  const OVER_LINES = ['', ''];
-
-  /** Paint one frame: the field, then the HUD or a panel for the screen the game is on. */
   function draw(state, screen, best) {
     context.setTransform(1, 0, 0, 1, 0, 0);
-    context.fillStyle = PALETTE.backdrop;
+    context.fillStyle = PALETTE.ink;
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
+
     drawField(state);
-    if (screen === SCREEN_TITLE) {
-      TITLE_LINES[2] = bestLabel(best);
-      drawPanel('Block Dodger', TITLE_LINES, 'Press Space or click to start');
-      return;
-    }
-    drawHud(state);
-    if (screen === SCREEN_PAUSED) drawPanel('Paused', PAUSED_LINES, 'Press P to resume');
-    else if (screen === SCREEN_OVER) {
-      OVER_LINES[0] = finalLabel(state.score);
-      OVER_LINES[1] = bestLabel(best);
-      drawPanel('Game over', OVER_LINES, 'Press Space or click to play again');
+
+    if (screen === SCREEN_PLAY) {
+      drawHud(state);
+    } else if (screen === SCREEN_TITLE) {
+      drawPanel('THE LAST VAULT', [
+        'One night. One diamond. Three ways in. One way out.',
+        'WASD move · Shift sprint · E loot · Q decoy · F EMP · R restart',
+      ], 'Press Space or click to start');
+    } else if (screen === SCREEN_PAUSED) {
+      drawPanel('Paused', ['The guards wait.'], 'Press P to resume');
+    } else if (screen === SCREEN_OVER) {
+      if (state.phase === 'victory') {
+        drawPanel('CLEAN GETAWAY', [
+          'Grade ' + state.grade,
+          'Time ' + Math.round(state.victoryTime) + 's · ' + state.detections + ' detections · Alarm ' + Math.round(state.finalAlarm),
+        ], 'Press Space to play again');
+      } else {
+        drawPanel('BUSTED', [
+          'The alarm hit 100.',
+          state.detections + ' detections · ' + Math.round(state.elapsed) + 's',
+        ], 'Press R to try again');
+      }
     }
   }
 
-  resize();
-  window.addEventListener('resize', resize);
   return { draw };
 }
