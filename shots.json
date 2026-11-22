@@ -1,5 +1,6 @@
 [
-  { "name": "1-start.jpg", "query": "?shot=start&seed=1" },
-  { "name": "2-play.jpg", "query": "?shot=play&seed=1" },
-  { "name": "3-end.jpg", "query": "?shot=end&seed=1" }
+  { "name": "01-cover.png", "query": "?shot=cover&seed=1" },
+  { "name": "02-detection.png", "query": "?shot=detection&seed=1" },
+  { "name": "03-loot.png", "query": "?shot=loot&seed=1" },
+  { "name": "04-escape.png", "query": "?shot=escape&seed=1" }
 ]
