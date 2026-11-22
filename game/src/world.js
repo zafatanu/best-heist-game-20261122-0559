@@ -325,6 +325,84 @@ export function createWorld(random) {
     return events;
   }
 
+  // Fixed scenes for screenshots (?shot=name): reset, then override positions.
+  function stage(name) {
+    reset();
+    if (name === 'detection') {
+      state.phase = 'play';
+      state.screen = 'play';
+      player.x = 580;
+      player.y = 430;
+      guards[0].x = 520;
+      guards[0].y = 330;
+      guards[0].angle = 55;
+      guards[0].spotting = true;
+      guards[0].wasSpotting = true;
+        state.alarm = 65;
+      state.alarmLabel = 'ALERT';
+      state.detections = 1;
+      state.elapsed = 78;
+      loot.taken = false;
+      state.hasLoot = false;
+      state.exitLit = false;
+    } else if (name === 'loot') {
+      state.phase = 'play';
+      state.screen = 'play';
+      state.hasLoot = true;
+      loot.taken = true;
+      loot.holdProgress = 1;
+      state.exitLit = true;
+      player.x = 640;
+      player.y = 340;
+      guards[1].x = 705;
+      guards[1].y = 360;
+      guards[1].angle = angleTo(705, 360, 640, 340);
+      guards[1].spotting = true;
+      guards[1].wasSpotting = true;
+      state.alarm = 88;
+      state.alarmLabel = 'LOCKDOWN WARNING';
+      state.detections = 2;
+      state.elapsed = 121;
+    } else if (name === 'escape') {
+      state.phase = 'victory';
+      state.screen = 'over';
+      state.hasLoot = true;
+      loot.taken = true;
+      state.exitLit = true;
+      player.x = 1128;
+      player.y = 632;
+      state.victoryTime = 210;
+      state.finalAlarm = 34;
+      state.detections = 1;
+      state.grade = 'A';
+      state.alarm = 34;
+      state.alarmLabel = 'SUSPICIOUS';
+      state.elapsed = 210;
+    } else {
+      // 'cover' — and any unknown scene name.
+      state.phase = 'play';
+      state.screen = 'play';
+      player.x = 560;
+      player.y = 560;
+      guards[0].x = 470;
+      guards[0].y = 355;
+      guards[0].angle = 300;
+      guards[0].spotting = false;
+      guards[1].x = 586;
+      guards[1].y = 682;
+      guards[1].angle = 180;
+      guards[1].spotting = false;
+      state.alarm = 21;
+      state.alarmLabel = 'SAFE';
+      loot.taken = false;
+      loot.holdProgress = 0;
+      state.hasLoot = false;
+      state.exitLit = false;
+      state.detections = 0;
+      state.elapsed = 57;
+    }
+  }
+
   reset();
-  return { state, reset, step };
+  return { state, reset, step, stage };
 }
